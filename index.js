@@ -10,6 +10,50 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// Health Check Endpoint
+app.get('/api/health', async (req, res) => {
+    try {
+        const pool = getPool();
+        const [[{ count }]] = await pool.query('SELECT COUNT(*) as count FROM words');
+        res.json({
+            status: 'ok',
+            uptime: process.uptime(),
+            timestamp: new Date().toISOString(),
+            db: 'connected',
+            wordCount: count
+        });
+    } catch (err) {
+        res.status(500).json({
+            status: 'degraded',
+            uptime: process.uptime(),
+            timestamp: new Date().toISOString(),
+            db: 'disconnected',
+            error: err.message
+        });
+    }
+});
+
+// Quick Search Endpoint
+app.get('/api/words/search', async (req, res) => {
+    try {
+        const query = (req.query.q || '').trim();
+        const limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
+        if (!query) {
+            return res.json([]);
+        }
+        const pool = getPool();
+        const searchPattern = `%${query}%`;
+        const [rows] = await pool.query(
+            'SELECT * FROM words WHERE en LIKE ? OR vi LIKE ? OR category LIKE ? LIMIT ?',
+            [searchPattern, searchPattern, searchPattern, limit]
+        );
+        res.json(rows);
+    } catch (err) {
+        console.error('Error searching words:', err);
+        res.status(500).json({ error: 'Failed to search words' });
+    }
+});
+
 // Routes
 app.get('/api/words', async (req, res) => {
     try {
