@@ -185,6 +185,42 @@ app.delete('/api/admin/users/:id', async (req, res) => {
     }
 });
 
+// --- FEATURE VISIBILITY SETTINGS ---
+app.get('/api/settings/visibility', async (req, res) => {
+    try {
+        const pool = getPool();
+        const [rows] = await pool.query('SELECT setting_value FROM system_settings WHERE setting_key = ?', ['feature_visibility']);
+        if (rows.length > 0) {
+            const parsed = JSON.parse(rows[0].setting_value);
+            return res.json(parsed);
+        }
+        res.json({ hiddenTopics: [], showGrammar: true, showGames: true });
+    } catch (err) {
+        console.error('Error fetching visibility settings:', err);
+        res.status(500).json({ error: 'Failed to fetch visibility settings' });
+    }
+});
+
+app.post('/api/settings/visibility', async (req, res) => {
+    try {
+        const { hiddenTopics, showGrammar, showGames } = req.body;
+        const config = {
+            hiddenTopics: Array.isArray(hiddenTopics) ? hiddenTopics : [],
+            showGrammar: showGrammar !== false,
+            showGames: showGames !== false
+        };
+        const pool = getPool();
+        await pool.query(
+            'INSERT INTO system_settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)',
+            ['feature_visibility', JSON.stringify(config)]
+        );
+        res.json({ success: true, settings: config });
+    } catch (err) {
+        console.error('Error saving visibility settings:', err);
+        res.status(500).json({ error: 'Failed to save visibility settings' });
+    }
+});
+
 // Routes
 app.get('/api/words', async (req, res) => {
     try {

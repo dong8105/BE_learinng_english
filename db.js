@@ -126,6 +126,30 @@ async function initDB() {
             console.log('Default users seeded successfully.');
         }
 
+        // Create System Settings Table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS system_settings (
+                setting_key VARCHAR(100) PRIMARY KEY,
+                setting_value LONGTEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `);
+
+        // Seed default feature_visibility if not present
+        const [settingsRows] = await pool.query('SELECT COUNT(*) as count FROM system_settings WHERE setting_key = ?', ['feature_visibility']);
+        if (settingsRows[0].count === 0) {
+            console.log('Seeding default feature_visibility settings...');
+            const defaultVisibility = {
+                hiddenTopics: [],
+                showGrammar: true,
+                showGames: true
+            };
+            await pool.query(
+                'INSERT INTO system_settings (setting_key, setting_value) VALUES (?, ?)',
+                ['feature_visibility', JSON.stringify(defaultVisibility)]
+            );
+        }
+
         console.log('Database initialized successfully.');
     } catch (err) {
         console.error('Database initialization failed:', err);
