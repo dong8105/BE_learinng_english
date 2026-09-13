@@ -177,6 +177,16 @@ async function initDB() {
             );
         }
 
+        // Create User Permissions Table (per-user visibility override)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS user_permissions (
+                user_id VARCHAR(100) PRIMARY KEY,
+                settings LONGTEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `);
+
         console.log('Database initialized successfully.');
     } catch (err) {
         console.error('Database initialization failed:', err);

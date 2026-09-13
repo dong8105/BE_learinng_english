@@ -356,6 +356,7 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
         const pool = getPool();
         await pool.query('DELETE FROM users WHERE id = ?', [id]);
         await pool.query('DELETE FROM user_progress WHERE user_id = ?', [id]);
+        await pool.query('DELETE FROM user_permissions WHERE user_id = ?', [id]);
         res.json({ success: true, message: 'Đã xóa người dùng thành công' });
     } catch (err) {
         console.error('Error deleting user:', err);
@@ -363,10 +364,46 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
     }
 });
 
-// --- FEATURE VISIBILITY SETTINGS ---
+// --- FEATURE VISIBILITY SETTINGS (GLOBAL & PER-USER) ---
 app.get('/api/settings/visibility', async (req, res) => {
     try {
         const pool = getPool();
+
+        // Check if there is an auth token in request header
+        const authHeader = req.headers['authorization'];
+        let currentUser = null;
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            const token = authHeader.split(' ')[1];
+            currentUser = verifySignedToken(token);
+        }
+
+        // If user is Admin, they should see everything
+        if (currentUser && currentUser.role === 'admin') {
+            return res.json({
+                hiddenTopics: [],
+                showGrammar: true,
+                showGames: true,
+                isAdmin: true
+            });
+        }
+
+        // If regular logged-in user, check for custom per-user permissions
+        if (currentUser && currentUser.id) {
+            const [userPerms] = await pool.query(
+                'SELECT settings FROM user_permissions WHERE user_id = ?',
+                [currentUser.id]
+            );
+            if (userPerms.length > 0) {
+                try {
+                    const parsed = JSON.parse(userPerms[0].settings);
+                    return res.json({ ...parsed, isCustom: true });
+                } catch (e) {
+                    console.error('Error parsing user permissions:', e);
+                }
+            }
+        }
+
+        // Fallback: Global default settings
         const [rows] = await pool.query('SELECT setting_value FROM system_settings WHERE setting_key = ?', ['feature_visibility']);
         if (rows.length > 0) {
             const parsed = JSON.parse(rows[0].setting_value);
@@ -396,6 +433,104 @@ app.post('/api/settings/visibility', requireAdmin, async (req, res) => {
     } catch (err) {
         console.error('Error saving visibility settings:', err);
         res.status(500).json({ error: 'Failed to save visibility settings' });
+    }
+});
+
+// List all user IDs that currently have custom visibility permissions
+app.get('/api/admin/visibility/custom-users', requireAdmin, async (req, res) => {
+    try {
+        const pool = getPool();
+        const [rows] = await pool.query('SELECT user_id FROM user_permissions');
+        const customUserIds = rows.map(r => r.user_id);
+        res.json({ success: true, customUserIds });
+    } catch (err) {
+        console.error('Error fetching custom users list:', err);
+        res.status(500).json({ error: 'Failed to fetch custom users list' });
+    }
+});
+
+// Get visibility settings for a specific user (or global fallback)
+app.get('/api/admin/users/:id/visibility', requireAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const pool = getPool();
+
+        const [users] = await pool.query('SELECT id, username, name, role FROM users WHERE id = ?', [id]);
+        if (users.length === 0) {
+            return res.status(404).json({ error: 'Người dùng không tồn tại' });
+        }
+
+        const [rows] = await pool.query('SELECT settings FROM user_permissions WHERE user_id = ?', [id]);
+        if (rows.length > 0) {
+            try {
+                const parsed = JSON.parse(rows[0].settings);
+                return res.json({
+                    hasCustom: true,
+                    settings: parsed,
+                    user: users[0]
+                });
+            } catch (e) {
+                console.error('Error parsing user permissions JSON:', e);
+            }
+        }
+
+        // Return global default if no custom setting
+        const [defaultRows] = await pool.query('SELECT setting_value FROM system_settings WHERE setting_key = ?', ['feature_visibility']);
+        const defaultSettings = defaultRows.length > 0
+            ? JSON.parse(defaultRows[0].setting_value)
+            : { hiddenTopics: [], showGrammar: true, showGames: true };
+
+        res.json({
+            hasCustom: false,
+            settings: defaultSettings,
+            user: users[0]
+        });
+    } catch (err) {
+        console.error('Error fetching user visibility settings:', err);
+        res.status(500).json({ error: 'Failed to fetch user visibility settings' });
+    }
+});
+
+// Save custom visibility settings for a specific user
+app.post('/api/admin/users/:id/visibility', requireAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { hiddenTopics, showGrammar, showGames } = req.body;
+        const pool = getPool();
+
+        const [users] = await pool.query('SELECT id, username, name, role FROM users WHERE id = ?', [id]);
+        if (users.length === 0) {
+            return res.status(404).json({ error: 'Người dùng không tồn tại' });
+        }
+
+        const config = {
+            hiddenTopics: Array.isArray(hiddenTopics) ? hiddenTopics : [],
+            showGrammar: showGrammar !== false,
+            showGames: showGames !== false
+        };
+
+        await pool.query(
+            'INSERT INTO user_permissions (user_id, settings) VALUES (?, ?) ON DUPLICATE KEY UPDATE settings = VALUES(settings)',
+            [id, JSON.stringify(config)]
+        );
+
+        res.json({ success: true, settings: config });
+    } catch (err) {
+        console.error('Error saving user visibility settings:', err);
+        res.status(500).json({ error: 'Failed to save user visibility settings' });
+    }
+});
+
+// Revert custom visibility settings for a specific user back to global default
+app.delete('/api/admin/users/:id/visibility', requireAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const pool = getPool();
+        await pool.query('DELETE FROM user_permissions WHERE user_id = ?', [id]);
+        res.json({ success: true, message: 'Đã hoàn tác về cấu hình mặc định chung cho người dùng' });
+    } catch (err) {
+        console.error('Error resetting user visibility settings:', err);
+        res.status(500).json({ error: 'Failed to reset user visibility settings' });
     }
 });
 
