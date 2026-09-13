@@ -54,6 +54,137 @@ app.get('/api/words/search', async (req, res) => {
     }
 });
 
+// --- AUTHENTICATION ROUTES ---
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { username, password } = req.body;
+        if (!username || !password) {
+            return res.status(400).json({ error: 'Vui lòng cung cấp đầy đủ tên đăng nhập và mật khẩu' });
+        }
+
+        const pool = getPool();
+        const [rows] = await pool.query(
+            'SELECT id, username, password, name, role, created_at FROM users WHERE username = ?',
+            [username.trim()]
+        );
+
+        if (rows.length === 0 || rows[0].password !== password) {
+            return res.status(401).json({ error: 'Tên đăng nhập hoặc mật khẩu không chính xác' });
+        }
+
+        const user = rows[0];
+        delete user.password;
+
+        const token = `token-${user.id}-${Date.now()}`;
+
+        res.json({
+            success: true,
+            user,
+            token
+        });
+    } catch (err) {
+        console.error('Login error:', err);
+        res.status(500).json({ error: 'Lỗi đăng nhập hệ thống' });
+    }
+});
+
+app.post('/api/auth/register', async (req, res) => {
+    try {
+        const { username, password, name } = req.body;
+        if (!username || !password) {
+            return res.status(400).json({ error: 'Vui lòng điền tên đăng nhập và mật khẩu' });
+        }
+
+        const pool = getPool();
+        const [existing] = await pool.query('SELECT id FROM users WHERE username = ?', [username.trim()]);
+        if (existing.length > 0) {
+            return res.status(409).json({ error: 'Tên đăng nhập đã tồn tại, vui lòng chọn tên khác' });
+        }
+
+        const userId = `user-${Date.now()}`;
+        const userName = name?.trim() || username.trim();
+        const role = 'user';
+
+        await pool.query(
+            'INSERT INTO users (id, username, password, name, role) VALUES (?, ?, ?, ?, ?)',
+            [userId, username.trim(), password, userName, role]
+        );
+
+        res.json({
+            success: true,
+            user: {
+                id: userId,
+                username: username.trim(),
+                name: userName,
+                role
+            },
+            token: `token-${userId}-${Date.now()}`
+        });
+    } catch (err) {
+        console.error('Register error:', err);
+        res.status(500).json({ error: 'Lỗi khi tạo tài khoản' });
+    }
+});
+
+// --- ADMIN ROUTES ---
+app.get('/api/admin/metrics', async (req, res) => {
+    try {
+        const pool = getPool();
+        const [[{ totalWords }]] = await pool.query('SELECT COUNT(*) as totalWords FROM words');
+        const [[{ withIpa }]] = await pool.query('SELECT COUNT(*) as withIpa FROM words WHERE ipa IS NOT NULL AND ipa != ""');
+        const [[{ withExample }]] = await pool.query('SELECT COUNT(*) as withExample FROM words WHERE example_en IS NOT NULL AND example_en != ""');
+        const [[{ totalUsers }]] = await pool.query('SELECT COUNT(*) as totalUsers FROM users');
+        const [categories] = await pool.query('SELECT category, COUNT(*) as count FROM words GROUP BY category ORDER BY count DESC LIMIT 10');
+        const [masterGroups] = await pool.query('SELECT master_group, COUNT(*) as count FROM words WHERE master_group IS NOT NULL GROUP BY master_group ORDER BY count DESC');
+
+        const mem = process.memoryUsage();
+
+        res.json({
+            status: 'ok',
+            uptime: process.uptime(),
+            timestamp: new Date().toISOString(),
+            metrics: {
+                totalWords,
+                withIpa,
+                withExample,
+                totalUsers,
+                memoryRssMb: Math.round(mem.rss / 1024 / 1024),
+                memoryHeapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+                nodeVersion: process.version,
+                platform: process.platform,
+                categories,
+                masterGroups
+            }
+        });
+    } catch (err) {
+        console.error('Admin metrics error:', err);
+        res.status(500).json({ error: 'Failed to fetch admin metrics' });
+    }
+});
+
+app.get('/api/admin/users', async (req, res) => {
+    try {
+        const pool = getPool();
+        const [rows] = await pool.query('SELECT id, username, name, role, created_at FROM users ORDER BY created_at DESC');
+        res.json(rows);
+    } catch (err) {
+        console.error('Error fetching users:', err);
+        res.status(500).json({ error: 'Failed to fetch users' });
+    }
+});
+
+app.delete('/api/admin/users/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const pool = getPool();
+        await pool.query('DELETE FROM users WHERE id = ?', [id]);
+        res.json({ success: true, message: 'Đã xóa người dùng thành công' });
+    } catch (err) {
+        console.error('Error deleting user:', err);
+        res.status(500).json({ error: 'Failed to delete user' });
+    }
+});
+
 // Routes
 app.get('/api/words', async (req, res) => {
     try {

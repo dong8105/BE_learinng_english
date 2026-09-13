@@ -100,6 +100,32 @@ async function initDB() {
             console.log('Database already has data. Skipping seed.');
         }
 
+        // Create Users Table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS users (
+                id VARCHAR(100) PRIMARY KEY,
+                username VARCHAR(100) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                name VARCHAR(255) DEFAULT 'User',
+                role VARCHAR(50) DEFAULT 'user',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `);
+
+        // Check if users exist, seed default admin and user if empty
+        const [userRows] = await pool.query('SELECT COUNT(*) as count FROM users');
+        if (userRows[0].count === 0) {
+            console.log('Seeding default users (admin & user)...');
+            await pool.query(
+                'INSERT INTO users (id, username, password, name, role) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)',
+                [
+                    'user-admin-001', 'admin', 'admin123', 'Quản Trị Viên (Admin)', 'admin',
+                    'user-learner-001', 'user', 'user123', 'Học Viên Mẫu', 'user'
+                ]
+            );
+            console.log('Default users seeded successfully.');
+        }
+
         console.log('Database initialized successfully.');
     } catch (err) {
         console.error('Database initialization failed:', err);
