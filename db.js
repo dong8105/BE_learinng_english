@@ -1,6 +1,7 @@
 const mysql = require('mysql2/promise');
 const fs = require('fs');
 const path = require('path');
+const { hashPassword } = require('./security');
 require('dotenv').config();
 
 const dbConfig = {
@@ -119,12 +120,38 @@ async function initDB() {
             await pool.query(
                 'INSERT INTO users (id, username, password, name, role) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)',
                 [
-                    'user-admin-001', 'admin', 'admin123', 'Quản Trị Viên (Admin)', 'admin',
-                    'user-learner-001', 'user', 'user123', 'Học Viên Mẫu', 'user'
+                    'user-admin-001', 'admin', hashPassword('admin123'), 'Quản Trị Viên (Admin)', 'admin',
+                    'user-learner-001', 'user', hashPassword('user123'), 'Học Viên Mẫu', 'user'
                 ]
             );
             console.log('Default users seeded successfully.');
+        } else {
+            // Auto-migrate legacy plain text passwords in users table
+            try {
+                const [users] = await pool.query('SELECT id, password FROM users');
+                for (const u of users) {
+                    if (u.password && !u.password.includes(':')) {
+                        const hashed = hashPassword(u.password);
+                        await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashed, u.id]);
+                        console.log(`Migrated user ${u.id} password to secure scrypt hash.`);
+                    }
+                }
+            } catch (migErr) {
+                console.error('Password migration error:', migErr);
+            }
         }
+
+        // Create User Progress Table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS user_progress (
+                user_id VARCHAR(100) NOT NULL,
+                progress_type VARCHAR(50) NOT NULL,
+                data LONGTEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, progress_type),
+                INDEX idx_user_id (user_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `);
 
         // Create System Settings Table
         await pool.query(`

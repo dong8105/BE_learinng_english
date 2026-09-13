@@ -1,6 +1,20 @@
 const express = require('express');
 const cors = require('cors');
 const { initDB, getPool } = require('./db');
+const {
+    hashPassword,
+    verifyPassword,
+    generateSignedToken,
+    verifySignedToken,
+    checkLoginRateLimit,
+    recordLoginFailure,
+    recordLoginSuccess,
+    checkRegisterRateLimit,
+    validateUsername,
+    validatePassword,
+    sanitizeName
+} = require('./security');
+
 const vertexAi = require('./vertexAi');
 
 const app = express();
@@ -54,9 +68,39 @@ app.get('/api/words/search', async (req, res) => {
     }
 });
 
+
+// --- AUTHENTICATION & AUTHORIZATION MIDDLEWARES ---
+const authenticateUser = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Yêu cầu đăng nhập để tiếp tục' });
+    }
+    const token = authHeader.split(' ')[1];
+    const decoded = verifySignedToken(token);
+    if (!decoded) {
+        return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại.' });
+    }
+    req.user = decoded;
+    next();
+};
+
+const requireAdmin = (req, res, next) => {
+    authenticateUser(req, res, () => {
+        if (req.user && req.user.role === 'admin') {
+            return next();
+        }
+        return res.status(403).json({ error: 'Truy cập bị từ chối: Yêu cầu quyền Quản trị viên (Admin)' });
+    });
+};
+
 // --- AUTHENTICATION ROUTES ---
 app.post('/api/auth/login', async (req, res) => {
     try {
+        const rateLimit = checkLoginRateLimit(req);
+        if (!rateLimit.allowed) {
+            return res.status(429).json({ error: rateLimit.message });
+        }
+
         const { username, password } = req.body;
         if (!username || !password) {
             return res.status(400).json({ error: 'Vui lòng cung cấp đầy đủ tên đăng nhập và mật khẩu' });
@@ -68,14 +112,39 @@ app.post('/api/auth/login', async (req, res) => {
             [username.trim()]
         );
 
-        if (rows.length === 0 || rows[0].password !== password) {
+        if (rows.length === 0) {
+            recordLoginFailure(req);
             return res.status(401).json({ error: 'Tên đăng nhập hoặc mật khẩu không chính xác' });
         }
 
-        const user = rows[0];
-        delete user.password;
+        const verifyResult = verifyPassword(password, rows[0].password);
+        if (!verifyResult.valid) {
+            recordLoginFailure(req);
+            return res.status(401).json({ error: 'Tên đăng nhập hoặc mật khẩu không chính xác' });
+        }
 
-        const token = `token-${user.id}-${Date.now()}`;
+        // Auto-upgrade legacy plain text password to secure scrypt hash
+        if (verifyResult.needsUpgrade) {
+            try {
+                const secureHash = hashPassword(password);
+                await pool.query('UPDATE users SET password = ? WHERE id = ?', [secureHash, rows[0].id]);
+                console.log(`Upgraded password for ${rows[0].username} to secure scrypt hash`);
+            } catch (upgErr) {
+                console.error('Failed to auto-upgrade password:', upgErr);
+            }
+        }
+
+        recordLoginSuccess(req);
+
+        const user = {
+            id: rows[0].id,
+            username: rows[0].username,
+            name: rows[0].name,
+            role: rows[0].role,
+            created_at: rows[0].created_at
+        };
+
+        const token = generateSignedToken(user);
 
         res.json({
             success: true,
@@ -90,35 +159,54 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.post('/api/auth/register', async (req, res) => {
     try {
-        const { username, password, name } = req.body;
-        if (!username || !password) {
-            return res.status(400).json({ error: 'Vui lòng điền tên đăng nhập và mật khẩu' });
+        const rateLimit = checkRegisterRateLimit(req);
+        if (!rateLimit.allowed) {
+            return res.status(429).json({ error: rateLimit.message });
         }
 
+        const { username, password, name } = req.body;
+
+        const userCheck = validateUsername(username, true);
+        if (!userCheck.valid) {
+            return res.status(400).json({ error: userCheck.error });
+        }
+
+        const passCheck = validatePassword(password);
+        if (!passCheck.valid) {
+            return res.status(400).json({ error: passCheck.error });
+        }
+
+        const sanitizedUsername = userCheck.sanitized;
+        const sanitizedUserName = sanitizeName(name, sanitizedUsername);
+
         const pool = getPool();
-        const [existing] = await pool.query('SELECT id FROM users WHERE username = ?', [username.trim()]);
+        const [existing] = await pool.query('SELECT id FROM users WHERE username = ?', [sanitizedUsername]);
         if (existing.length > 0) {
             return res.status(409).json({ error: 'Tên đăng nhập đã tồn tại, vui lòng chọn tên khác' });
         }
 
         const userId = `user-${Date.now()}`;
-        const userName = name?.trim() || username.trim();
-        const role = 'user';
+        const hashedPassword = hashPassword(password);
+        const role = 'user'; // Strictly enforced user role (clients can never self-assign admin)
 
         await pool.query(
             'INSERT INTO users (id, username, password, name, role) VALUES (?, ?, ?, ?, ?)',
-            [userId, username.trim(), password, userName, role]
+            [userId, sanitizedUsername, hashedPassword, sanitizedUserName, role]
         );
+
+        const user = {
+            id: userId,
+            username: sanitizedUsername,
+            name: sanitizedUserName,
+            role
+        };
+
+        const token = generateSignedToken(user);
 
         res.json({
             success: true,
-            user: {
-                id: userId,
-                username: username.trim(),
-                name: userName,
-                role
-            },
-            token: `token-${userId}-${Date.now()}`
+            user,
+            token
         });
     } catch (err) {
         console.error('Register error:', err);
@@ -126,8 +214,60 @@ app.post('/api/auth/register', async (req, res) => {
     }
 });
 
-// --- ADMIN ROUTES ---
-app.get('/api/admin/metrics', async (req, res) => {
+// --- USER PROGRESS ENDPOINTS (ISOLATED PER USER & MYSQL SYNC) ---
+app.get('/api/progress/:type', authenticateUser, async (req, res) => {
+    try {
+        const { type } = req.params;
+        const userId = req.user.id;
+        const pool = getPool();
+        const [rows] = await pool.query(
+            'SELECT data, updated_at FROM user_progress WHERE user_id = ? AND progress_type = ?',
+            [userId, type]
+        );
+
+        if (rows.length > 0) {
+            let parsed = {};
+            try {
+                parsed = JSON.parse(rows[0].data);
+            } catch {
+                parsed = rows[0].data;
+            }
+            return res.json({ success: true, progressType: type, data: parsed, updatedAt: rows[0].updated_at });
+        }
+
+        res.json({ success: true, progressType: type, data: null });
+    } catch (err) {
+        console.error('Error fetching user progress:', err);
+        res.status(500).json({ error: 'Không thể lấy tiến trình người dùng' });
+    }
+});
+
+app.post('/api/progress/:type', authenticateUser, async (req, res) => {
+    try {
+        const { type } = req.params;
+        const { data } = req.body;
+        const userId = req.user.id;
+
+        if (data === undefined) {
+            return res.status(400).json({ error: 'Dữ liệu tiến trình không được để trống' });
+        }
+
+        const stringified = typeof data === 'string' ? data : JSON.stringify(data);
+        const pool = getPool();
+        await pool.query(
+            'INSERT INTO user_progress (user_id, progress_type, data) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)',
+            [userId, type, stringified]
+        );
+
+        res.json({ success: true, progressType: type });
+    } catch (err) {
+        console.error('Error saving user progress:', err);
+        res.status(500).json({ error: 'Không thể lưu tiến trình người dùng' });
+    }
+});
+
+// --- ADMIN ROUTES (SECURED WITH REQUIRE_ADMIN) ---
+app.get('/api/admin/metrics', requireAdmin, async (req, res) => {
     try {
         const pool = getPool();
         const [[{ totalWords }]] = await pool.query('SELECT COUNT(*) as totalWords FROM words');
@@ -162,7 +302,7 @@ app.get('/api/admin/metrics', async (req, res) => {
     }
 });
 
-app.get('/api/admin/users', async (req, res) => {
+app.get('/api/admin/users', requireAdmin, async (req, res) => {
     try {
         const pool = getPool();
         const [rows] = await pool.query('SELECT id, username, name, role, created_at FROM users ORDER BY created_at DESC');
@@ -173,11 +313,49 @@ app.get('/api/admin/users', async (req, res) => {
     }
 });
 
-app.delete('/api/admin/users/:id', async (req, res) => {
+app.post('/api/admin/users', requireAdmin, async (req, res) => {
+    try {
+        const { username, password, name, role } = req.body;
+        const userCheck = validateUsername(username, false);
+        if (!userCheck.valid) {
+            return res.status(400).json({ error: userCheck.error });
+        }
+        const passCheck = validatePassword(password);
+        if (!passCheck.valid) {
+            return res.status(400).json({ error: passCheck.error });
+        }
+
+        const pool = getPool();
+        const [existing] = await pool.query('SELECT id FROM users WHERE username = ?', [userCheck.sanitized]);
+        if (existing.length > 0) {
+            return res.status(409).json({ error: 'Tên đăng nhập đã tồn tại' });
+        }
+
+        const userId = `user-${Date.now()}`;
+        const hashedPassword = hashPassword(password);
+        const assignedRole = role === 'admin' ? 'admin' : 'user';
+
+        await pool.query(
+            'INSERT INTO users (id, username, password, name, role) VALUES (?, ?, ?, ?, ?)',
+            [userId, userCheck.sanitized, hashedPassword, sanitizeName(name, userCheck.sanitized), assignedRole]
+        );
+
+        res.json({
+            success: true,
+            user: { id: userId, username: userCheck.sanitized, name: sanitizeName(name, userCheck.sanitized), role: assignedRole }
+        });
+    } catch (err) {
+        console.error('Admin create user error:', err);
+        res.status(500).json({ error: 'Không thể tạo tài khoản người dùng' });
+    }
+});
+
+app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         const pool = getPool();
         await pool.query('DELETE FROM users WHERE id = ?', [id]);
+        await pool.query('DELETE FROM user_progress WHERE user_id = ?', [id]);
         res.json({ success: true, message: 'Đã xóa người dùng thành công' });
     } catch (err) {
         console.error('Error deleting user:', err);
@@ -201,7 +379,7 @@ app.get('/api/settings/visibility', async (req, res) => {
     }
 });
 
-app.post('/api/settings/visibility', async (req, res) => {
+app.post('/api/settings/visibility', requireAdmin, async (req, res) => {
     try {
         const { hiddenTopics, showGrammar, showGames } = req.body;
         const config = {
