@@ -47,10 +47,27 @@ const corsOptions = {
     optionsSuccessStatus: 204
 };
 
-// 1. Áp dụng thư viện cors duy nhất (BỎ middleware tự gán res.setHeader thủ công phía dưới)
+// 1. Universal Preflight & CORS Assurance Middleware
+// Guarantees that Access-Control-Allow-Origin is NEVER wildcard '*' when credentials: 'include'
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && isAllowedOrigin(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Vary', 'Origin');
+    }
+    if (req.method === 'OPTIONS') {
+        res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, PUT, PATCH, POST, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control, Pragma, X-Token, token');
+        res.setHeader('Access-Control-Expose-Headers', 'Set-Cookie, Content-Disposition, Content-Length');
+        return res.sendStatus(204);
+    }
+    next();
+});
+
+// 2. Standard CORS Middleware
 app.use(cors(corsOptions));
 
-// 2. Chú ý kiểm tra file này: đảm bảo bên trong KHÔNG có res.setHeader('Access-Control-Allow-Origin', '*')
 app.use(securityHeaders);
 
 app.use(cookieParser);

@@ -10,11 +10,15 @@ const { initDB, getPool } = require('./src/db/connection');
 const PORT = config.PORT;
 
 async function startServer() {
-    console.log('Initializing database in SOLID architecture...');
-    await initDB();
-    
+    // 1. Bind HTTP port immediately so Render health checks pass without delay
     const server = app.listen(PORT, '0.0.0.0', () => {
         console.log(`Server is running on port ${PORT} (SOLID modular architecture)`);
+    });
+
+    // 2. Initialize database asynchronously
+    console.log('Initializing database in SOLID architecture...');
+    initDB().catch(err => {
+        console.error('Database initialization warning:', err.message);
     });
 
     return server;

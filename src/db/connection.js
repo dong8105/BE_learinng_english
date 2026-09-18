@@ -8,12 +8,15 @@ let pool;
 
 async function initDB() {
     try {
-        const { database, ...serverConnConfig } = config.db;
-        
-        // 1. Create DB if not exists
-        const connection = await mysql.createConnection(serverConnConfig);
-        await connection.query(`CREATE DATABASE IF NOT EXISTS \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
-        await connection.end();
+        // 1. Create DB if not exists (soft attempt, allowed to fail on managed cloud DBs)
+        try {
+            const { database, ...serverConnConfig } = config.db;
+            const connection = await mysql.createConnection(serverConnConfig);
+            await connection.query(`CREATE DATABASE IF NOT EXISTS \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+            await connection.end();
+        } catch (dbCreateErr) {
+            console.warn('Notice: CREATE DATABASE skipped or not permitted (using pre-created database):', dbCreateErr.message);
+        }
 
         // 2. Create Pool
         pool = mysql.createPool(config.db);
@@ -144,8 +147,7 @@ async function initDB() {
 
         console.log('Database initialized successfully in modular architecture.');
     } catch (err) {
-        console.error('Database initialization failed:', err);
-        process.exit(1);
+        console.error('Database initialization failed (server will stay alive and retry):', err.message);
     }
 }
 
