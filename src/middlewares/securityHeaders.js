@@ -6,14 +6,14 @@ function securityHeaders(req, res, next) {
     // 1. Content-Security-Policy (CSP)
     // Allows safe first-party scripts, Google AI APIs, fonts, styles, Vite dev server, while blocking untrusted 3rd-party script injections
     const cspDirectives = [
-        "default-src 'self' http://localhost:* ws://localhost:*",
+        "default-src 'self' http://localhost:* ws://localhost:* https://fe-learning-english.vercel.app https://*.vercel.app",
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://apis.google.com",
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
         "font-src 'self' data: https://fonts.gstatic.com",
         "img-src 'self' data: blob: https:",
         "media-src 'self' data: blob: https:",
-        "connect-src 'self' http://localhost:* ws://localhost:* https://generativelanguage.googleapis.com",
-        "frame-ancestors 'none'",
+        "connect-src 'self' http://localhost:* ws://localhost:* https://fe-learning-english.vercel.app https://*.vercel.app https://generativelanguage.googleapis.com",
+        "frame-ancestors 'self' https://fe-learning-english.vercel.app https://*.vercel.app",
         "base-uri 'self'",
         "object-src 'none'"
     ];

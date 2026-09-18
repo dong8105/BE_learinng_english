@@ -8,12 +8,15 @@ const {
 } = require('../../security');
 
 const COOKIE_NAME = 'token';
-const COOKIE_OPTIONS = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 7 * 24 * 60 * 60 * 1000
+const getCookieOptions = (req) => {
+    const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https' || (req.headers.origin && req.headers.origin.startsWith('https://'));
+    return {
+        httpOnly: true,
+        secure: Boolean(isHttps),
+        sameSite: isHttps ? 'none' : 'lax',
+        path: '/',
+        maxAge: 7 * 24 * 60 * 60 * 1000
+    };
 };
 
 class AuthController {
@@ -29,7 +32,7 @@ class AuthController {
                 const result = await authService.login(username, password);
                 recordLoginSuccess(req);
                 if (result.token) {
-                    res.cookie(COOKIE_NAME, result.token, COOKIE_OPTIONS);
+                    res.cookie(COOKIE_NAME, result.token, getCookieOptions(req));
                 }
                 return res.json({ success: true, ...result });
             } catch (authErr) {
@@ -53,7 +56,7 @@ class AuthController {
                 const result = await authService.register({ username, password, name });
                 recordRegisterAttempt(req);
                 if (result.token) {
-                    res.cookie(COOKIE_NAME, result.token, COOKIE_OPTIONS);
+                    res.cookie(COOKIE_NAME, result.token, getCookieOptions(req));
                 }
                 return res.json({ success: true, ...result });
             } catch (regErr) {
@@ -66,11 +69,7 @@ class AuthController {
 
     async logout(req, res, next) {
         try {
-            res.clearCookie(COOKIE_NAME, {
-                httpOnly: true,
-                sameSite: 'lax',
-                path: '/'
-            });
+            res.clearCookie(COOKIE_NAME, getCookieOptions(req));
             return res.json({ success: true, message: 'Đăng xuất thành công' });
         } catch (err) {
             next(err);
