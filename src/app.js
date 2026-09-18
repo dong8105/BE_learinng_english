@@ -52,6 +52,8 @@ const corsOptions = {
 // 1. CORS Preflight & Base Middleware
 app.use(cors(corsOptions));
 
+app.options('*', cors(corsOptions));
+
 // 2. Extra CORS Assurance Header Middleware
 app.use((req, res, next) => {
     const origin = req.headers.origin;
