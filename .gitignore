@@ -1,5 +1,27 @@
+# Dependencies
+node_modules/
+jspm_packages/
+.npm/
+
+# Environment Variables & Secrets
+.env
+.env.*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+!.env.example
+!.env.template
+vertex-key.json
+*-key.json
+*credential*.json
+service-account*.json
+*.pem
+*.key
+*.cert
+
 # Logs
-logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -7,46 +29,68 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Dependency directories
-node_modules/
-jspm_packages/
-
-# Optional npm cache directory
-.npm
-
-# Optional eslint cache
-.eslintcache
-
-# dotenv environment variables file
-.env
-.env.*
-!.env.example
-!.env.template
-
-# Output of 'npm pack'
-*.tgz
-
-# Build directory
+# Build & Output
 dist/
 build/
 out/
+*.tgz
+.eslintcache
 
-# IDEs and editors
+# IDEs & Editors
 .idea/
 .vscode/
+.history/
 *.swp
 *.swo
-.DS_Store
+*.tmp
+*.temp
 
-# Data and credentials
-vertex-key.json
+# OS files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Heavy raw media & PDFs (avoid repo bloat, total > 88MB)
 *.pdf
 *.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.mp3
+*.wav
 minna_pages/
+
+# Raw text & markdown data dumps (scraping / OCR / migration files)
 *.txt
+tu-vung-*.md
+500-tu-vung-toeic.md
+
+# Pipeline & temporary migration JSON files
 completed_ids.json
 examplesToTranslate.json
 minna_50_lessons.json
 minna_processed_pages.json
-500-tu-vung-toeic.md
+
+# Database dumps & backup files
+backup*.json
+*.bak
+*.backup
+*.sql
+*.dump
+*.sqlite
+*.sqlite3
+
+# One-off ETL & migration tool scripts
 tools/
+
+# Compressed & archive files
+*.rar
+*.zip
+*.7z
+*.tar.gz
+
+# AI Tools & Agents Cache
+.agents/
+.codegraph/
