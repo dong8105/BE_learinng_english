@@ -49,7 +49,6 @@ const corsOptions = {
 
 // 1. Áp dụng thư viện cors duy nhất (BỎ middleware tự gán res.setHeader thủ công phía dưới)
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
 
 // 2. Chú ý kiểm tra file này: đảm bảo bên trong KHÔNG có res.setHeader('Access-Control-Allow-Origin', '*')
 app.use(securityHeaders);
