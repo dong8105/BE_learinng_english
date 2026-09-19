@@ -47,6 +47,17 @@ const corsOptions = {
     optionsSuccessStatus: 204
 };
 
+// 0. URL Normalization Middleware (prevents //api/... from returning 404)
+app.use((req, res, next) => {
+    if (req.url && req.url.includes('//')) {
+        const [path, ...queryParts] = req.url.split('?');
+        const query = queryParts.length > 0 ? '?' + queryParts.join('?') : '';
+        const normalizedPath = path.replace(/\/+/g, '/');
+        req.url = normalizedPath + query;
+    }
+    next();
+});
+
 // 1. Universal Preflight & CORS Assurance Middleware
 // Guarantees that Access-Control-Allow-Origin is NEVER wildcard '*' when credentials: 'include'
 app.use((req, res, next) => {
