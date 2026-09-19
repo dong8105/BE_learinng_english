@@ -74,6 +74,25 @@ app.use(cookieParser);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// Root & Status Check for Deployments
+app.get('/', (req, res) => {
+    res.json({
+        status: 'online',
+        service: 'Learning English Backend API',
+        version: '1.0.0',
+        architecture: 'SOLID',
+        timestamp: new Date().toISOString()
+    });
+});
+
+app.get('/api', (req, res) => {
+    res.json({
+        status: 'online',
+        message: 'API Gateway operational',
+        endpoints: '/api/words, /api/health, /api/auth, /api/progress, /api/presence, /api/settings'
+    });
+});
+
 // Mount routes
 app.use('/api', apiRoutes);
 
