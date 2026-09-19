@@ -54,7 +54,11 @@ async function initDB() {
             'collocations TEXT DEFAULT NULL',
             'mnemonics TEXT DEFAULT NULL',
             'context_passage TEXT DEFAULT NULL',
-            'io_prompt TEXT DEFAULT NULL'
+            'io_prompt TEXT DEFAULT NULL',
+            'kanji VARCHAR(255) DEFAULT NULL',
+            'hiragana VARCHAR(255) DEFAULT NULL',
+            'romaji VARCHAR(255) DEFAULT NULL',
+            'am_han VARCHAR(255) DEFAULT NULL'
         ];
 
         for (const col of optionalColumns) {
@@ -63,6 +67,66 @@ async function initDB() {
             } catch (e) {
                 // Column already exists
             }
+        }
+
+        // Auto-seed words dataset if table is empty or has fewer than 100 words
+        try {
+            const [wordCountRows] = await pool.query('SELECT COUNT(*) as count FROM words');
+            if (wordCountRows[0].count < 100) {
+                const seedPath = path.join(__dirname, '../../words_seed.json');
+                if (fs.existsSync(seedPath)) {
+                    console.log('Seeding initial 5000 words dataset into database...');
+                    const seedWords = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
+                    const chunkSize = 200;
+                    for (let i = 0; i < seedWords.length; i += chunkSize) {
+                        const chunk = seedWords.slice(i, i + chunkSize);
+                        const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+                        const values = [];
+                        chunk.forEach(w => {
+                            values.push(
+                                w.id,
+                                w.en || '',
+                                w.vi || '',
+                                w.ipa || '',
+                                w.category || '',
+                                w.unit !== undefined ? w.unit : null,
+                                w.master_group || null,
+                                w.sub_group || null,
+                                w.definition_en || null,
+                                w.definition_vi || null,
+                                w.example_en || null,
+                                w.example_vi || null,
+                                w.collocations || null,
+                                w.mnemonics || null,
+                                w.context_passage || null,
+                                w.io_prompt || null,
+                                w.kanji || null,
+                                w.hiragana || null,
+                                w.romaji || null,
+                                w.am_han || null
+                            );
+                        });
+                        await pool.query(
+                            `INSERT INTO words (
+                                id, en, vi, ipa, category, unit, master_group, sub_group,
+                                definition_en, definition_vi, example_en, example_vi,
+                                collocations, mnemonics, context_passage, io_prompt,
+                                kanji, hiragana, romaji, am_han
+                            ) VALUES ${placeholders}
+                            ON DUPLICATE KEY UPDATE
+                                en=VALUES(en), vi=VALUES(vi), ipa=VALUES(ipa), category=VALUES(category),
+                                unit=VALUES(unit), master_group=VALUES(master_group), sub_group=VALUES(sub_group),
+                                definition_en=VALUES(definition_en), definition_vi=VALUES(definition_vi),
+                                example_en=VALUES(example_en), example_vi=VALUES(example_vi),
+                                kanji=VALUES(kanji), hiragana=VALUES(hiragana), romaji=VALUES(romaji), am_han=VALUES(am_han)`,
+                            values
+                        );
+                    }
+                    console.log(`Successfully seeded ${seedWords.length} words into database!`);
+                }
+            }
+        } catch (seedErr) {
+            console.warn('Notice: Words auto-seed warning (will retry on next launch):', seedErr.message);
         }
 
         // 4. Create Users Table
